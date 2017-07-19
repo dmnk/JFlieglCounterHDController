@@ -6,7 +6,6 @@ An Java Controller class with Listener Pattern for connecting, configuring and m
 Create an instance of JCounterHDController i.e. from within your Activity and add a propper Listener to it.
 
 '''
-
 public class YOUR_ACTIVITY extends AppCompatActivity implements JCounterHDController.CounterHDControllerListener
 
 // ...
