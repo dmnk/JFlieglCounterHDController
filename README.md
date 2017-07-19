@@ -5,7 +5,7 @@ An Java Controller class with Listener Pattern for connecting, configuring and m
 
 Create an instance of JCounterHDController i.e. from within your Activity and add a propper Listener to it.
 
-'''
+```
 public class YOUR_ACTIVITY extends AppCompatActivity implements JCounterHDController.CounterHDControllerListener
 
 // ...
@@ -34,14 +34,13 @@ protected void onCreate(Bundle savedInstanceState) {
         // ...
 
     }
-	
-'''
+```
 
-Make sure you implement/override all listener calls, especially '''cc_didFindPeripherals''' wichs gives you the opportunity to connect to a Fliegl CounterHD beacon (Peripheral) as soon as one was found over BTLE.
-
+Make sure you implement/override all listener calls, especially ```cc_didFindPeripherals``` wichs gives you the opportunity to connect to a Fliegl CounterHD beacon (Peripheral) as soon as one was found over BTLE.
 
 
-'''
+
+```
 public void cc_didFindPeripherals(final List<BluetoothDevice> peripheralList) {
 
         runOnUiThread(new Runnable() {
@@ -76,4 +75,4 @@ public void cc_didFindPeripherals(final List<BluetoothDevice> peripheralList) {
 
 
     }
-'''
+```
