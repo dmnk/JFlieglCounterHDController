@@ -36,7 +36,7 @@ protected void onCreate(Bundle savedInstanceState) {
     }
 ```
 
-![Screenshot](/Screenshot.png =350x)
+<img src="Screenshot.png" alt="Drawing" style="width: 350px;"/>
 
 Make sure you implement/override all listener calls, especially ```cc_didFindPeripherals``` wichs gives you the opportunity to connect to a Fliegl CounterHD beacon (Peripheral) as soon as one was found over BTLE.
 
