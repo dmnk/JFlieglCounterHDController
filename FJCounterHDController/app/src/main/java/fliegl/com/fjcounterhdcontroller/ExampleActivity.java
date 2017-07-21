@@ -6,11 +6,14 @@ import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.content.Context;
 import android.content.res.Resources;
+import android.os.AsyncTask;
 import android.support.annotation.LayoutRes;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
@@ -19,6 +22,7 @@ import android.widget.ListView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -26,6 +30,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
+
 
 import static android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON;
 
@@ -41,6 +46,10 @@ public class ExampleActivity extends AppCompatActivity implements JCounterHDCont
     // User interface
     Button scanButton;
     Button disconnectButton;
+    Button sendBootloaderButton;
+    Button calibrateAxisButton;
+    Button requestEEPSelftestButton;
+
     TextView textView;
     TextView inclinationTextView;
 
@@ -74,6 +83,40 @@ public class ExampleActivity extends AppCompatActivity implements JCounterHDCont
                 disconnectButtonPushed();
             }
         });
+
+        sendBootloaderButton = (Button) findViewById(R.id.sendBootloader);
+        sendBootloaderButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if (counterController != null)
+                {
+                    counterController.setPeripheral_bootloaderCommand();
+                }
+            }
+        });
+
+        calibrateAxisButton = (Button) findViewById(R.id.calibrateButton);
+        calibrateAxisButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if (counterController != null)
+                {
+                    counterController.setPeripheral_calibrate_XYZ();
+                }
+            }
+        });
+
+        requestEEPSelftestButton = (Button) findViewById(R.id.requestEEPTest);
+        requestEEPSelftestButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                if (counterController != null)
+                {
+                    counterController.setPeripheral_EEPSelftest();
+                }
+            }
+        });
+
         textView = (TextView) findViewById(R.id.textView);
         SimpleDateFormat sdf = new SimpleDateFormat("kk:mm:ss");
 
@@ -88,6 +131,8 @@ public class ExampleActivity extends AppCompatActivity implements JCounterHDCont
         {
             counterController.disconnectPeripheral();
         }
+
+
     }
 
     void scanButtonPushed()
@@ -417,10 +462,59 @@ public class ExampleActivity extends AppCompatActivity implements JCounterHDCont
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                inclinationTextView.setText("");
+                inclinationTextView.setText(String.format("X: %d° Y: %d° Z: %d°", xCorrectedInclination, yCorrectedInclination, zCorrectedInclination));
                 textView.append(String.format("\nInclination:\nX: %d° Y: %d° Z: %d° \nCorrected:\nX: %d° Y: %d° Z: %d° ",xInclination, yInclination, zInclination, xCorrectedInclination, yCorrectedInclination, zCorrectedInclination ));
             }
         });
+    }
+
+    @Override
+    public void cc_didUpdateAxisConfiguration(final int axis, final int mode, final int flavor,
+                                              final int filterTime, final int isInverted, final int isRSDependent,
+                                              final int topBound, final int botBound,
+                                              final int topInertia, final int botInertia) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                textView.append(String.format("\nReceived Axis-Config: %d %d %d %d %d %d %d %d %d %d ", axis, mode, flavor, filterTime, isInverted, isRSDependent, topBound, botBound, topInertia, botInertia));
+            }
+        });
+    }
+
+    @Override
+    public void cc_didUpdateEEPROMSelftestResult(final int errorCount, final byte[] testResultBytes) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                textView.append(String.format("\nReceived EEEPRom Testresult with %d errors.", errorCount));
+
+                showToastWithString(String.format("\nReceived EEEPRom Testresult with %d errors.", errorCount));
+            }
+        });
+    }
+
+    @Override
+    public void cc_didUpdatePeripheralTimeDate(final Date date) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                textView.append(String.format("\nReceived Peripherals Date: %s", date.toString()));
+            }
+        });
+    }
+
+    @Override
+    public void cc_didUpdateRadioPower(final int radioPower){
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                textView.append(String.format("\nReceived Radio Power: %d dBm", radioPower));
+            }
+        });
+    }
+
+    private void showToastWithString(String s){
+        Toast.makeText(getApplicationContext(), s , Toast.LENGTH_SHORT).show();
     }
 
 

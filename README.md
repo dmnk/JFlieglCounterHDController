@@ -1,5 +1,5 @@
 # JFlieglCounterHDController
-An Java Controller class with Listener Pattern for connecting, configuring and managing Fliegl Agrartechnik CounterHD iBeacon Hardware.
+An Java Controller class with Listener Pattern for connecting, configuring and managing Fliegl Agrartechnik CounterHD iBeacon Hardware. And a simple example implementation of an Android App.
 
 # Usage
 
@@ -35,6 +35,8 @@ protected void onCreate(Bundle savedInstanceState) {
 
     }
 ```
+
+![Screenshot](/Screenshot.png?raw=true "Example App")
 
 Make sure you implement/override all listener calls, especially ```cc_didFindPeripherals``` wichs gives you the opportunity to connect to a Fliegl CounterHD beacon (Peripheral) as soon as one was found over BTLE.
 

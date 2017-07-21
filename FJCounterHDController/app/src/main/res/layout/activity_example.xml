@@ -20,17 +20,6 @@
             tools:layout_editor_absoluteX="8dp"
             tools:layout_editor_absoluteY="8dp">
 
-            <TextView
-                android:id="@+id/textView2"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Hello World!"
-                app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintLeft_toLeftOf="parent"
-                app:layout_constraintRight_toRightOf="parent"
-                app:layout_constraintTop_toTopOf="parent" />
-
             <Button
                 android:id="@+id/disconnectButton"
                 android:layout_width="wrap_content"
@@ -42,10 +31,11 @@
 
             <Button
                 android:id="@+id/ScanButton"
+                style="@style/Widget.AppCompat.Button.Colored"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Scan"
+                android:text="Scan and connect"
                 tools:layout_editor_absoluteX="140dp"
                 tools:layout_editor_absoluteY="177dp" />
         </LinearLayout>
@@ -54,7 +44,34 @@
             android:id="@+id/inclinationTextView"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Inclination" />
+            android:text="Inclination"
+            android:textAlignment="center"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingBottom="20dp">
+
+            <Button
+                android:id="@+id/calibrateButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Calibrate Axis (XYZ)" />
+
+            <Button
+                android:id="@+id/sendBootloader"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Send to Bootloader" />
+
+            <Button
+                android:id="@+id/requestEEPTest"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Request EEP Selftest" />
+        </LinearLayout>
 
         <ScrollView
             android:layout_width="match_parent"
