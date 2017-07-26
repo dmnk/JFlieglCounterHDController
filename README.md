@@ -78,3 +78,6 @@ public void cc_didFindPeripherals(final List<BluetoothDevice> peripheralList) {
 
     }
 ```
+
+I use this class also in my configuration app for example:
+![](http://imgur.com/a/t4MOu.gif)
