@@ -359,7 +359,7 @@ public class JCounterHDController {
         public void onScanResult(int callbackType, ScanResult result) {
 
             BluetoothDevice btDevice = result.getDevice();
-
+            List<BluetoothDevice> addDeviceList = new ArrayList<>();
             List<ParcelUuid> uuids = result.getScanRecord().getServiceUuids();
             if(uuids != null)
             {
@@ -374,10 +374,11 @@ public class JCounterHDController {
                                     if (d.getAddress().equalsIgnoreCase(btDevice.getAddress())) {
                                         Log.i(TAG, "Found: DUPLICATE " + btDevice.getName() + " (" + btDevice.getAddress() + ") \n" + uid.getUuid().toString() + String.format("\n%d Peripherals", peripheralList.size()));
                                     } else {
-                                        peripheralList.add(btDevice);
+                                        addDeviceList.add(btDevice);
                                         Log.i(TAG, "Found: " + btDevice.getName() + " (" + btDevice.getAddress() + ") \n" + uid.getUuid().toString() + String.format("\n%d Peripherals", peripheralList.size()));
                                     }
                                 }
+                                peripheralList.addAll(addDeviceList);
                             }else{
                                 peripheralList.add(btDevice);
                                 Log.i(TAG, "Found: " + btDevice.getName() + " (" + btDevice.getAddress() + ") \n" + uid.getUuid().toString() + String.format("\n%d Peripherals", peripheralList.size()));
