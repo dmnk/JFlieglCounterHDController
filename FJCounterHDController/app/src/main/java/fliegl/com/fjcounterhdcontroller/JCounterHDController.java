@@ -33,6 +33,9 @@ import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Created by Johannes Dürr on 06.07.17.
@@ -41,6 +44,20 @@ import java.util.UUID;
 
 
 public class JCounterHDController {
+
+    // singleton
+    private static JCounterHDController mInstance = null;
+
+    public static JCounterHDController getInstance() {
+        if (mInstance == null) {
+            Class clazz = JCounterHDController.class;
+            synchronized (clazz) {
+                mInstance = new JCounterHDController(null);
+            }
+        }
+        return mInstance;
+    }
+
 
     private static final int WRITE                   =2;
     private static final int READ                    =1;
@@ -89,7 +106,7 @@ public class JCounterHDController {
     private BluetoothAdapter mBluetoothAdapter;
     private int REQUEST_ENABLE_BT = 1;
     private Handler mHandler;
-    private static final long SCAN_PERIOD = 2000;
+    private static final long SCAN_PERIOD = 6000;
     private BluetoothLeScanner mLEScanner;
     private ScanSettings settings;
     private List<ScanFilter> filterlist = new ArrayList<>();
@@ -97,23 +114,34 @@ public class JCounterHDController {
     private Timer characteristicRetrievalTimer = null;
     private List<BluetoothGattCharacteristic> characteristicList = new ArrayList<>();
     private List<BluetoothGattCharacteristic> characteristicDoneList = new ArrayList<>();
+    private List<BluetoothGattCharacteristic> characteristicNotificationList = new ArrayList<>();
+
+    // Characteristics
     private BluetoothGattCharacteristic commandCharacteristic = null;
     private BluetoothGattCharacteristic bootCharacteristic = null;
-
+    // read / notify
+    private BluetoothGattCharacteristic beaconBasicInfoCharacteristic = null;
+    private BluetoothGattCharacteristic uuidCharacteristic;
+    private BluetoothGattCharacteristic batteryInformationCharacteristic;
+    private BluetoothGattCharacteristic buttonStateCharacteristic;
+    private BluetoothGattCharacteristic eventTotalsCharacteristic;
+    private BluetoothGattCharacteristic deviceStateCharacteristic;
+    private BluetoothGattCharacteristic lis3dhCharacteristic;
+    private BluetoothGattCharacteristic paramTransportCharacteristic;
 
     // GATT client
     BluetoothGatt mGatt = null;
     private BluetoothGattCallback mGattCallback = null;
 
     // Listener pattern receiving var
-    private CounterHDControllerListener listener;
+    private List<CounterHDControllerListener> listeners;
 
 
     // Constructor
     public JCounterHDController(final AppCompatActivity activity)
     {
         this.activity = activity;
-        this.listener = null;
+        this.listeners = new ArrayList<>();
         characteristicRetrievalTimer = new Timer();
 
         // Make sure, we have propper permissions to use bluetooth
@@ -152,10 +180,158 @@ public class JCounterHDController {
                 .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                 .build();
 
+        if (mGattCallback == null) {
+            mGattCallback = new BluetoothGattCallback() {
+
+                @Override
+                public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+
+                    for (CounterHDControllerListener listener : listeners
+                            ) {
+                        if (listener != null) {
+
+                            switch (newState) {
+                                case 0:
+                                    // Disconnected
+                                    Log.i(TAG, "mGatCallback: Disconnected");
+                                    listener.cc_didChangeConnectionState(gatt, status, newState);
+                                    break;
+                                case 1:
+                                    // Connecteing
+                                    Log.i(TAG, "mGatCallback: Connecting");
+                                    break;
+                                case 2:
+                                    // Connected
+                                    Log.i(TAG, "mGatCallback: Connected");
+
+                                    mGatt = gatt;
+
+                                    listener.cc_didChangeConnectionState(gatt, status, newState);
+                                    gatt.discoverServices();
+                                    break;
+
+                                case 3:
+                                    // Disconnecting
+                                    Log.i(TAG, "mGatCallback: Disconnecting");
+                                    break;
+
+                                default:
+                                    break;
+
+                            }
+                        }
+                    }
+                }
+
+
+                @Override
+                // New services discovered
+                public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+                    Log.i(TAG, "Discovered a new Service....");
+
+                    for (BluetoothGattService s : gatt.getServices()
+                            ) {
+                        // only counter service...
+                        if (s.getUuid().toString().equalsIgnoreCase(flieglCounterServiceUUID.toString())) {
+                            // add to characteristic list if not allready in there...
+                            for (BluetoothGattCharacteristic c : s.getCharacteristics()
+                                    ) {
+                                if (!characteristicList.contains(c)) {
+                                    characteristicList.add(c);
+                                    Log.i(TAG, String.format("Added characteristic to list: %s from Service: %s", c.getUuid().toString(), c.getService().getUuid().toString()));
+                                }
+                                // find and remember the command characteristic
+                                if (c.getUuid().toString().equalsIgnoreCase(flieglCounterCommandCharacteristicUUID.toString())) {
+                                    commandCharacteristic = c;
+                                }
+                                if (c.getUuid().toString().equalsIgnoreCase(flieglCounterBootCharacteristicUUID.toString())) {
+                                    bootCharacteristic = c;
+                                }
+                            }
+                            TimerTask charTimeTask = new TimerTask() {
+                                @Override
+                                public void run() {
+                                    if (mGatt != null)
+                                        readCharacteristicList(mGatt);
+                                }
+                            };
+                            characteristicRetrievalTimer.schedule(charTimeTask, 0, 500);
+                        }
+                    }
+
+                }
+
+                @Override
+                // Result of a characteristic read operation
+                public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+
+                    if (status == BluetoothGatt.GATT_SUCCESS) {
+                        // check if notifiable
+                        if (isCharacterisiticNotifiable(characteristic)) {
+                            if (!characteristicNotificationList.contains(characteristic)){
+                                characteristicNotificationList.add(characteristic);
+                            }
+                            // set notify
+                            gatt.setCharacteristicNotification(characteristic, true);
+                            // and write descriptor
+                            BluetoothGattDescriptor desc = characteristic.getDescriptor(CONFIG_DESCRIPTOR);
+                            desc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                            gatt.writeDescriptor(desc);
+                            Log.i(TAG, String.format("Enabling notification for: %s", characteristic.getUuid().toString()));
+                        }
+
+                        for (BluetoothGattCharacteristic tChar : characteristicList
+                                ) {
+                            if (tChar.getUuid().toString().equalsIgnoreCase(characteristic.getUuid().toString())) {
+                                characteristicDoneList.add(tChar);
+                            }
+                        }
+                        for (CounterHDControllerListener listener : listeners
+                                ) {
+                            if (listener != null) {
+                                listener.cc_didReadCharacteristicValue(gatt, characteristic);
+                            }
+                        }
+
+
+                        // process value
+                        processCharacteristicValue(gatt, characteristic);
+                    }
+                }
+
+                @Override
+                public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+                    Log.i(TAG, String.format("Characteristic changed: %s", characteristic.getUuid().toString()));
+
+                    for (CounterHDControllerListener listener : listeners
+                            ) {
+                        if (listener != null) {
+                            listener.cc_didChangeCharacteristicValue(gatt, characteristic);
+                        }
+                    }
+
+                    // process value
+                    processCharacteristicValue(gatt, characteristic);
+                }
+            };
+        }
+
+        mInstance = this;
+
+
+
     }
 
     public void setCounterHDControllerListener(CounterHDControllerListener listener) {
-        this.listener = listener;
+        this.listeners.add(listener);
+    }
+
+    public void removeListener(CounterHDControllerListener listener){
+        this.listeners.remove(listener);
+    }
+
+    public void removeAllListeners(){
+        this.listeners.clear();
     }
 
 
@@ -211,9 +387,14 @@ public class JCounterHDController {
                 }
             }
             // tell listeners
-            if (listener != null){
-                listener.cc_didFindPeripherals(peripheralList);
+            for (CounterHDControllerListener listener : listeners
+                    ) {
+                if (listener != null){
+                    listener.cc_didFindPeripherals(peripheralList);
+                }
             }
+
+
         }
     };
 
@@ -243,138 +424,40 @@ public class JCounterHDController {
      */
     public void disconnectPeripheral(){
 
-        if (mGatt != null){
-            mGatt.disconnect();
-            mGatt.close();
-            mGatt = null;
-        }
-        peripheralList.clear();
+        characteristicRetrievalTimer.purge();
 
+        if (mGatt != null){
+            for (BluetoothGattCharacteristic c : characteristicNotificationList
+                    ) {
+                // disable notifications
+                mGatt.setCharacteristicNotification(c, false);
+                // and write descriptor
+                BluetoothGattDescriptor desc = c.getDescriptor(CONFIG_DESCRIPTOR);
+                desc.setValue(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE);
+                mGatt.writeDescriptor(desc);
+                Log.i(TAG, String.format("Enabling notification for: %s", c.getUuid().toString()));
+            }
+
+            final ScheduledExecutorService exec = Executors.newScheduledThreadPool(1);
+            exec.schedule(new Runnable(){
+                @Override
+                public void run(){
+                    mGatt.disconnect();
+                }
+            }, 1, TimeUnit.SECONDS);
+        }
     }
 
     /**
      *
      * @param d the BTLE Peripheral a connection should be established.
      */
-    public void connectPeripheral(BluetoothDevice d){
-
-        mGattCallback = new BluetoothGattCallback() {
-
-            @Override
-            public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
-                if (listener != null){
-                    listener.cc_didChangeConnectionState(gatt, status, newState);
-
-
-
-                    switch (newState){
-                        case 0:
-                            // Disconnected
-                            Log.i(TAG, "mGatCallback: Disconnected");
-                            break;
-                        case 1:
-                            // Connecteing
-                            Log.i(TAG, "mGatCallback: Connecting");
-                            break;
-                        case 2:
-                            // Connected
-                            Log.i(TAG, "mGatCallback: Connected");
-                            gatt.discoverServices();
-                            break;
-
-                        case 3:
-                            // Disconnecting
-                            Log.i(TAG, "mGatCallback: Disconnecting");
-                            break;
-
-                        default:
-                            break;
-
-                    }
-                }
-            }
-
-            @Override
-            // New services discovered
-            public void onServicesDiscovered(BluetoothGatt gatt, int status) {
-                Log.i(TAG, "Discovered a new Service....");
-                mGatt = gatt;
-                for (BluetoothGattService s : gatt.getServices()
-                     ) {
-                    // only counter service...
-                    if (s.getUuid().toString().equalsIgnoreCase(flieglCounterServiceUUID.toString())) {
-                        // add to characteristic list if not allready in there...
-                        for (BluetoothGattCharacteristic c : s.getCharacteristics()
-                                ) {
-                            if (!characteristicList.contains(c)) {
-                                characteristicList.add(c);
-                                Log.i(TAG, String.format("Added characteristic to list: %s from Service: %s", c.getUuid().toString(), c.getService().getUuid().toString()));
-                            }
-                            // find and remember the command characteristic
-                            if (c.getUuid().toString().equalsIgnoreCase(flieglCounterCommandCharacteristicUUID.toString())){
-                                commandCharacteristic = c;
-                            }
-                            if (c.getUuid().toString().equalsIgnoreCase(flieglCounterBootCharacteristicUUID.toString())){
-                                bootCharacteristic = c;
-                            }
-                        }
-                        TimerTask charTimeTask = new TimerTask() {
-                            @Override
-                            public void run() {
-                            if (mGatt != null)
-                                readCharacteristicList(mGatt);
-                            }
-                        };
-                        characteristicRetrievalTimer.schedule(charTimeTask, 0, 500);
-                    }
-                }
-
-            }
-
-            @Override
-            // Result of a characteristic read operation
-            public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-
-                if (status == BluetoothGatt.GATT_SUCCESS) {
-                    // check if notifiable
-                    if (isCharacterisiticNotifiable(characteristic)){
-                        // set notify
-                        gatt.setCharacteristicNotification(characteristic, true);
-                        // and write descriptor
-                        BluetoothGattDescriptor desc = characteristic.getDescriptor(CONFIG_DESCRIPTOR);
-                        desc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-                        gatt.writeDescriptor(desc);
-                        Log.i(TAG, String.format("Enabling notification for: %s", characteristic.getUuid().toString()));
-                    }
-
-                    for (BluetoothGattCharacteristic tChar : characteristicList
-                         ) {
-                        if (tChar.getUuid().toString().equalsIgnoreCase(characteristic.getUuid().toString())){
-                            characteristicDoneList.add(tChar);
-                        }
-                    }
-
-                    if (listener != null){
-                        listener.cc_didReadCharacteristicValue(gatt, characteristic);
-                    }
-                    // process value
-                    processCharacteristicValue(gatt, characteristic);
-                }
-            }
-
-            @Override
-            public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-                Log.i(TAG, String.format("Characteristic changed: %s", characteristic.getUuid().toString()));
-                if (listener != null)
-                {
-                    listener.cc_didChangeCharacteristicValue(gatt, characteristic);
-                }
-                // process value
-                processCharacteristicValue(gatt, characteristic);
-            }
-        };
-
+    public void connectPeripheral(BluetoothDevice d) {
+        characteristicRetrievalTimer = new Timer();
         d.connectGatt(activity, false, mGattCallback);
+        Log.i(TAG, "GATT: connecting to peripheral...");
+
+
     }
 
     // Updated or read characteristic values are processed here depending on wich UUID they state to have:
@@ -403,12 +486,17 @@ public class JCounterHDController {
                 } catch (UnsupportedEncodingException e) {
                     e.printStackTrace();
                 }
-                if (listener != null) {
-                    listener.cc_didUpdateBluetoothLocalName(name);
-                    listener.cc_didUpdateMajorValue(major);
-                    listener.cc_didUpdateMinorValue(minor);
-                    listener.cc_didUpdateTXPower(txPower);
+                for (CounterHDControllerListener listener : listeners
+                        ) {
+                    if (listener != null) {
+                        listener.cc_didUpdateBluetoothLocalName(name);
+                        listener.cc_didUpdateMajorValue(major);
+                        listener.cc_didUpdateMinorValue(minor);
+                        listener.cc_didUpdateTXPower(txPower);
+                    }
                 }
+                beaconBasicInfoCharacteristic = characteristic;
+
                 break;
 
             // UUID
@@ -417,9 +505,13 @@ public class JCounterHDController {
                 String beaconUUID = "UUID unavailable";
                 UUID cUUID = UUID.nameUUIDFromBytes(Arrays.copyOfRange(characteristic.getValue(), 0, 16));
                 beaconUUID = cUUID.toString();
-                if (listener != null){
-                    listener.cc_didUpdateUUID(beaconUUID);
+                for (CounterHDControllerListener listener : listeners
+                        ) {
+                    if (listener != null){
+                        listener.cc_didUpdateUUID(beaconUUID);
+                    }
                 }
+                uuidCharacteristic = characteristic;
                 break;
 
             // Battery information
@@ -427,13 +519,19 @@ public class JCounterHDController {
                 Integer charge = 0;
                 Boolean isDCDCEnabled = false;
                 charge = getIntFromBytes(characteristic.getValue(), 0, 1);
+                Log.i(TAG,String.format("Updated Battery charge: %d", charge));
                 if (characteristic.getValue()[1] == 0x01)
                 {
                     isDCDCEnabled = true;
                 }
-                if (listener != null){
-                    listener.cc_didUpdateBatteryInfo(charge, isDCDCEnabled);
+                for (CounterHDControllerListener listener : listeners
+                        ) {
+                    if (listener != null){
+                        listener.cc_didUpdateBatteryInfo(charge, isDCDCEnabled);
+                    }
                 }
+                batteryInformationCharacteristic = characteristic;
+
                 break;
 
             // button state
@@ -442,32 +540,37 @@ public class JCounterHDController {
                 if (testByte != 0){
                     Log.i(TAG, String.format("TESTBYTE: %d", testByte));
                 }
-                if(listener != null) {
-                    if ((testByte & 1) == 1) {
-                        // Button 3
-                        listener.cc_didUpdateButton_3_state(true);
-                    }else{
-                        listener.cc_didUpdateButton_3_state(false);
-                    }
-                    if ((testByte & 2) == 2) {
-                        // Button 1
-                        listener.cc_didUpdateButton_1_state(true);
-                    }else{
-                        listener.cc_didUpdateButton_1_state(false);
-                    }
-                    if ((testByte & 4) == 4) {
-                        // Button 2
-                        listener.cc_didUpdateButton_2_state(true);
-                    }else{
-                        listener.cc_didUpdateButton_2_state(false);
-                    }
-                    if ((testByte & 8) == 8) {
-                        // Button 4
-                        listener.cc_didUpdateButton_4_state(true);
-                    }else{
-                        listener.cc_didUpdateButton_4_state(false);
+                for (CounterHDControllerListener listener : listeners
+                        ) {
+                    if(listener != null) {
+                        if ((testByte & 1) == 1) {
+                            // Button 3
+                            listener.cc_didUpdateButton_3_state(true);
+                        }else{
+                            listener.cc_didUpdateButton_3_state(false);
+                        }
+                        if ((testByte & 2) == 2) {
+                            // Button 1
+                            listener.cc_didUpdateButton_1_state(true);
+                        }else{
+                            listener.cc_didUpdateButton_1_state(false);
+                        }
+                        if ((testByte & 4) == 4) {
+                            // Button 2
+                            listener.cc_didUpdateButton_2_state(true);
+                        }else{
+                            listener.cc_didUpdateButton_2_state(false);
+                        }
+                        if ((testByte & 8) == 8) {
+                            // Button 4
+                            listener.cc_didUpdateButton_4_state(true);
+                        }else{
+                            listener.cc_didUpdateButton_4_state(false);
+                        }
                     }
                 }
+                buttonStateCharacteristic = characteristic;
+
 
                 break;
 
@@ -483,9 +586,14 @@ public class JCounterHDController {
                 Integer xProcessCount = getIntFromBytes(characteristic.getValue(),12,2);
                 Integer yProcessCount = getIntFromBytes(characteristic.getValue(),14,2);
                 Integer zProcessCount = getIntFromBytes(characteristic.getValue(),16,2);
-                if (listener!= null){
-                    listener.cc_didUpdateEventTotals(xEventCount,xActiveTime, xProcessCount, yEventCount, yActiveTime, yProcessCount, zEventCount, zActiveTime, zProcessCount);
+                for (CounterHDControllerListener listener : listeners
+                        ) {
+                    if (listener!= null){
+                        listener.cc_didUpdateEventTotals(xEventCount,xActiveTime, xProcessCount, yEventCount, yActiveTime, yProcessCount, zEventCount, zActiveTime, zProcessCount);
+                    }
                 }
+                eventTotalsCharacteristic = characteristic;
+
                 break;
 
             // Device State
@@ -494,26 +602,31 @@ public class JCounterHDController {
                 Integer deviceType = getIntFromBytes(characteristic.getValue(),0,2);
                 Integer deviceRevision = getIntFromBytes(characteristic.getValue(),2,2);
                 Integer buildNumber = getIntFromBytes(characteristic.getValue(), 4, 2);
-                Integer rs_count = getIntFromBytes(characteristic.getValue(), 6, 2);
-
-                Integer firmwareMajor = getIntFromBytes(characteristic.getValue(), 8, 1);
-                Integer firmwareMinor = getIntFromBytes(characteristic.getValue(), 9, 1);;
-
-                Integer statusBits = getIntFromBytes(characteristic.getValue(), 10, 4);
-                Integer rs_time = getIntFromBytes(characteristic.getValue(), 14, 4);
+                Integer firmwareMajor = getIntFromBytes(characteristic.getValue(), 6, 1);
+                Integer firmwareMinor = getIntFromBytes(characteristic.getValue(), 7, 1);
+                Integer statusBits = getIntFromBytes(characteristic.getValue(), 8, 4);
+                Integer rs_time = getIntFromBytes(characteristic.getValue(), 12, 4);
+                Integer rs_count = getIntFromBytes(characteristic.getValue(), 16, 2);
                 Integer user_role = getIntFromBytes(characteristic.getValue(), 18, 1);
+                Integer temperature = getIntFromBytes(characteristic.getValue(), 19, 1);
 
-                if (listener != null)
-                {
-                    listener.cc_didUpdateDeviceType(deviceType);
-                    listener.cc_didUpdateDeviceRevision(deviceRevision);
-                    listener.cc_didUpdateBuildNumber(buildNumber);
-                    listener.cc_didUpdateRS_Count(rs_count);
-                    listener.cc_didUpdateRS_Time(rs_time);
-                    listener.cc_didUpdateFirmwareVersion(firmwareMajor, firmwareMinor);
-                    listener.cc_didUpdateUserRole(user_role);
-                    listener.cc_didUpdateStatusFlags(statusBits);
+                for (CounterHDControllerListener listener : listeners
+                        ) {
+                    if (listener != null)
+                    {
+                        listener.cc_didUpdateDeviceType(deviceType);
+                        listener.cc_didUpdateDeviceRevision(deviceRevision);
+                        listener.cc_didUpdateBuildNumber(buildNumber);
+                        listener.cc_didUpdateRS_Count(rs_count);
+                        listener.cc_didUpdateRS_Time(rs_time);
+                        listener.cc_didUpdateFirmwareVersion(firmwareMajor, firmwareMinor);
+                        listener.cc_didUpdateUserRole(user_role);
+                        listener.cc_didUpdateStatusFlags(statusBits);
+                        listener.cc_didUpdateTemperature(temperature);
+                    }
                 }
+                deviceStateCharacteristic = characteristic;
+
                 break;
 
             // Lis3dh incl Characteristic
@@ -531,13 +644,18 @@ public class JCounterHDController {
                 Integer freqBin2 = getIntFromBytes(characteristic.getValue(), 17, 1);
                 Integer freqBin3 = getIntFromBytes(characteristic.getValue(), 18, 1);
                 Integer freqBin4 = getIntFromBytes(characteristic.getValue(), 19, 1);
-                if (listener != null)
-                {
-                    listener.cc_didUpdateAccelerometerValues(xInclination, xCorrectedInclination, xAcceleration,
-                            yInclination, yCorrectedInclination, yAcceleration,
-                            zInclination, zCorrectedInclination, zAcceleration,
-                            freqBin1, freqBin2, freqBin3, freqBin4);
+                for (CounterHDControllerListener listener : listeners
+                        ) {
+                    if (listener != null)
+                    {
+                        listener.cc_didUpdateAccelerometerValues(xInclination, xCorrectedInclination, xAcceleration,
+                                yInclination, yCorrectedInclination, yAcceleration,
+                                zInclination, zCorrectedInclination, zAcceleration,
+                                freqBin1, freqBin2, freqBin3, freqBin4);
+                    }
                 }
+                lis3dhCharacteristic = characteristic;
+
                 break;
 
             // Param Transport (reading back predefined parameters)
@@ -556,34 +674,50 @@ public class JCounterHDController {
                         int  botBound = getSIntFromBytes(characteristic.getValue(), 10,2);
                         int  topInertia = getIntFromBytes(characteristic.getValue(), 12,2);
                         int  botInertia = getIntFromBytes(characteristic.getValue(), 14,2);
-                        if (listener != null)
-                        {
-                            listener.cc_didUpdateAxisConfiguration(axis, mode, flavor, filterTime, isInverted, isRSDependent, topBound, botBound, topInertia, botInertia);
+                        for (CounterHDControllerListener listener : listeners
+                                ) {
+                            if (listener != null)
+                            {
+                                listener.cc_didUpdateAxisConfiguration(axis, mode, flavor, filterTime, isInverted, isRSDependent, topBound, botBound, topInertia, botInertia);
+                            }
                         }
+
                         break;
 
                     case CMD_EEPROM_SELF_TEST:
                         int eepromErrorCount =   getIntFromBytes(characteristic.getValue(), 2,1);
                         byte[] testResult = Arrays.copyOfRange(characteristic.getValue(),3, 13);
-                        if (listener!=null)
-                        {
-                            listener.cc_didUpdateEEPROMSelftestResult(eepromErrorCount, testResult);
+                        for (CounterHDControllerListener listener : listeners
+                                ) {
+                            if (listener!=null)
+                            {
+                                listener.cc_didUpdateEEPROMSelftestResult(eepromErrorCount, testResult);
+                            }
                         }
+
                         break;
 
                     case CMD_READ_CURRENT_TIME:
                         int secsSince1970 = getIntFromBytes(characteristic.getValue(),2,4);
                         Date date = new Date(secsSince1970);
-                        if (listener!=null){
-                            listener.cc_didUpdatePeripheralTimeDate(date);
+                        for (CounterHDControllerListener listener : listeners
+                                ) {
+                            if (listener!=null){
+                                listener.cc_didUpdatePeripheralTimeDate(date);
+                            }
                         }
+
                         break;
 
                     case CMD_READ_RADIO_POWER:
                         int radioPower = getSIntFromBytes(characteristic.getValue(),2,1);
-                        if (listener!=null){
-                            listener.cc_didUpdateRadioPower(radioPower);
+                        for (CounterHDControllerListener listener : listeners
+                                ) {
+                            if (listener!=null){
+                                listener.cc_didUpdateRadioPower(radioPower);
+                            }
                         }
+
                         break;
 
                     case CMD_EEPROM_TRANSPORT:
@@ -593,7 +727,9 @@ public class JCounterHDController {
 
                     default:
                         break;
+
                 }
+                paramTransportCharacteristic = characteristic;
                 break;
 
             default:
@@ -601,7 +737,21 @@ public class JCounterHDController {
         }
     }
 
-    /* Peripheral manipulation methods */
+    /* Peripheral manipulation methods -----------------------------------------------------------*/
+
+    public void requestReadBatteryInformation(boolean setEnableNotificationOnChange){
+        if (batteryInformationCharacteristic != null && mGatt != null){
+            mGatt.readCharacteristic(batteryInformationCharacteristic);
+            if (setEnableNotificationOnChange){
+                mGatt.setCharacteristicNotification(batteryInformationCharacteristic, true);
+                // and write descriptor
+                BluetoothGattDescriptor desc = batteryInformationCharacteristic.getDescriptor(CONFIG_DESCRIPTOR);
+                desc.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                mGatt.writeDescriptor(desc);
+                Log.i(TAG, String.format("Enabling notification for: %s", batteryInformationCharacteristic.getUuid().toString()));
+            }
+        }
+    }
 
     /**
      *
@@ -1357,11 +1507,11 @@ public class JCounterHDController {
         }
     }
 
-    public void setPeripheral_requestAxisConfiguration(){
+    public void setPeripheral_requestAxisConfiguration(Byte requestedAxis){
         byte[] cmdVal = new byte[20];
         cmdVal[0] = WRITE;
         cmdVal[1] = CMD_READ_AXIS_CONFIG;
-
+        cmdVal[2] = requestedAxis;
         try {
             sendCommandCharValue(cmdVal);
         } catch (Exception e) {
@@ -1411,6 +1561,7 @@ public class JCounterHDController {
         public void cc_didUpdateFirmwareVersion(final Integer major, final Integer minor);
         public void cc_didUpdateUserRole(final Integer userRole);
         public void cc_didUpdateStatusFlags(final  Integer statusFlags);
+        public void cc_didUpdateTemperature(final Integer temperature);
 
         // LIS Accellerometer
         public  void cc_didUpdateAccelerometerValues(final Integer xInclination, final Integer xCorrectedInclination, final Integer xGravity,

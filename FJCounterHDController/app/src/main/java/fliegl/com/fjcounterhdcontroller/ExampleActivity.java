@@ -513,6 +513,11 @@ public class ExampleActivity extends AppCompatActivity implements JCounterHDCont
         });
     }
 
+    @Override
+    public void cc_didUpdateTemperature(final Integer temperature){
+
+    }
+
     private void showToastWithString(String s){
         Toast.makeText(getApplicationContext(), s , Toast.LENGTH_SHORT).show();
     }
