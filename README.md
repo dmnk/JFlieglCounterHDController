@@ -80,4 +80,4 @@ public void cc_didFindPeripherals(final List<BluetoothDevice> peripheralList) {
 ```
 
 I use this class also in my configuration app for example:
-![](http://imgur.com/a/t4MOu.gif)
+<blockquote class="imgur-embed-pub" lang="en" data-id="a/t4MOu"><a href="//imgur.com/t4MOu"></a></blockquote><script async src="//s.imgur.com/min/embed.js" charset="utf-8"></script>
