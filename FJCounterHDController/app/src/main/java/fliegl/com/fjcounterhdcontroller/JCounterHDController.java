@@ -29,7 +29,9 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
@@ -39,6 +41,10 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Created by Johannes Dürr on 06.07.17.
+ */
+ 
+ /**
+ * fix dublicate check by dmnk on 25.04.2018 
  */
 
 
@@ -110,7 +116,7 @@ public class JCounterHDController {
     private BluetoothLeScanner mLEScanner;
     private ScanSettings settings;
     private List<ScanFilter> filterlist = new ArrayList<>();
-    private List<BluetoothDevice> peripheralList = new ArrayList<>();
+    private Map<String, BluetoothDevice> peripheralList = new HashMap<>();
     private Timer characteristicRetrievalTimer = null;
     private List<BluetoothGattCharacteristic> characteristicList = new ArrayList<>();
     private List<BluetoothGattCharacteristic> characteristicDoneList = new ArrayList<>();
@@ -359,7 +365,7 @@ public class JCounterHDController {
         public void onScanResult(int callbackType, ScanResult result) {
 
             BluetoothDevice btDevice = result.getDevice();
-            List<BluetoothDevice> addDeviceList = new ArrayList<>();
+            Map<String, BluetoothDevice> addDeviceList = new HashMap<>();
             List<ParcelUuid> uuids = result.getScanRecord().getServiceUuids();
             if(uuids != null)
             {
@@ -370,17 +376,16 @@ public class JCounterHDController {
                         if (uid.getUuid().toString().equalsIgnoreCase(flieglCounterUUID.toString()))
                         {
                             if (peripheralList.size() > 0) {
-                                for (BluetoothDevice d : peripheralList) {
-                                    if (d.getAddress().equalsIgnoreCase(btDevice.getAddress())) {
-                                        Log.i(TAG, "Found: DUPLICATE " + btDevice.getName() + " (" + btDevice.getAddress() + ") \n" + uid.getUuid().toString() + String.format("\n%d Peripherals", peripheralList.size()));
-                                    } else {
-                                        addDeviceList.add(btDevice);
-                                        Log.i(TAG, "Found: " + btDevice.getName() + " (" + btDevice.getAddress() + ") \n" + uid.getUuid().toString() + String.format("\n%d Peripherals", peripheralList.size()));
-                                    }
+                                if(peripheralList.containsKey(btDevice.getAddress())) {
+                                    Log.i(TAG, "Found: DUPLICATE " + btDevice.getName() + " (" + btDevice.getAddress() + ") \n" + uid.getUuid().toString() + String.format("\n%d Peripherals", peripheralList.size()));
+                                } else {
+                                    Log.i(TAG, "Found: " + btDevice.getName() + " (" + btDevice.getAddress() + ") \n" + uid.getUuid().toString() + String.format("\n%d Peripherals", peripheralList.size()));
+                                    addDeviceList.put(btDevice.getAddress(), btDevice);
                                 }
-                                peripheralList.addAll(addDeviceList);
-                            }else{
-                                peripheralList.add(btDevice);
+                                peripheralList.putAll(addDeviceList);
+
+                            } else {
+                                peripheralList.put(btDevice.getAddress(), btDevice);
                                 Log.i(TAG, "Found: " + btDevice.getName() + " (" + btDevice.getAddress() + ") \n" + uid.getUuid().toString() + String.format("\n%d Peripherals", peripheralList.size()));
                             }
                         }
@@ -391,7 +396,7 @@ public class JCounterHDController {
             for (CounterHDControllerListener listener : listeners
                     ) {
                 if (listener != null){
-                    listener.cc_didFindPeripherals(peripheralList);
+                    listener.cc_didFindPeripherals(new ArrayList<BluetoothDevice>(peripheralList.values()));
                 }
             }
 
